@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Inter-House Poll</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef3fb;
+    --card:#ffffff;
+    --accent:#f7dcb0;
+    --accent-border:#f0a63a;
+    --green:#2fb871;
+    --blue:#2d86ff;
+    --red:#eb4343;
+    --yellow:#f0a000;
+    --muted:#6b7280;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;}
+  body{background:linear-gradient(180deg,var(--bg) 0%, #f7fbff 100%);display:flex;align-items:center;justify-content:center;padding:28px;}
+  .wrap{width:100%;max-width:420px;margin:0 auto;}
+  .card{
+    background:var(--card);
+    border-radius:18px;
+    box-shadow:0 18px 40px rgba(18,38,63,0.08);
+    padding:26px;
+  }
+  h1{font-size:34px;margin:0 0 6px 0;font-weight:800;color:#111827;}
+  p.lead{margin:0 0 18px 0;color:var(--muted);font-size:15px;}
+  .note{
+    background:linear-gradient(180deg,#fff6e8,#fff0d6);
+    border-left:6px solid var(--accent-border);
+    padding:14px 14px;
+    border-radius:12px;
+    margin-bottom:18px;
+    color:#5a4633;
+    box-shadow: 0 8px 18px rgba(240,166,58,0.08);
+  }
+  .subtitle{color:var(--muted);text-align:center;margin:12px 0 18px;}
+  .btn{
+    width:100%;
+    border-radius:12px;
+    padding:14px 16px;
+    margin:10px 0;
+    font-weight:700;
+    font-size:16px;
+    color:#fff;
+    border:none;
+    cursor:pointer;
+    box-shadow:0 10px 24px rgba(16,24,40,0.06);
+  }
+  .btn-green{background:var(--green);}
+  .btn-blue{background:var(--blue);}
+  .btn-red{background:var(--red);}
+  .btn-yellow{background:var(--yellow); color:#111;}
+  .btn.disabled{opacity:.6;cursor:default}
+  .votes{margin-top:18px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;font-size:14px}
+  .results{margin-top:14px;border-radius:12px;padding:12px;background:#fafafa;border:1px solid rgba(16,24,40,0.03);display:none}
+  .result-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px dashed rgba(16,24,40,0.04);}
+  .result-row:last-child{border-bottom:0;}
+  .bar{height:10px;border-radius:8px;background:rgba(0,0,0,0.06);overflow:hidden;margin-left:12px;flex:1;}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg, rgba(0,0,0,0.12), rgba(0,0,0,0.05));}
+  .footer{margin-top:18px;text-align:center;color:var(--muted);font-size:13px}
+  .row{display:flex;gap:12px;align-items:center}
+  #votedMsg{display:none;margin:18px 0;padding:12px;border-radius:10px;background:#ecfdf5;border:1px solid #34d399;color:#065f46;align-items:center}
+  #votedMsg span{margin-left:8px}
+  @media (max-width:420px){
+    body{padding:18px;}
+    h1{font-size:28px}
+    .card{padding:20px;border-radius:16px}
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" role="main" aria-labelledby="title">
+      <h1 id="title">Inter-House Poll</h1>
+      <p class="lead">Which House Display did you like the best?</p>
+
+      <div class="note" id="note">Vote for the House Display you liked best — not your child’s house.</div>
+
+      <p class="subtitle">Choose your favourite house below:</p>
+
+      <!-- buttons already have data-option which the script uses -->
+      <button class="btn btn-green" data-option="Green">Green House (Mithila)</button>
+      <button class="btn btn-blue" data-option="Blue">Blue House (Nalanda)</button>
+      <button class="btn btn-red" data-option="Red">Red House (Takshashila)</button>
+      <button class="btn btn-yellow" data-option="Yellow">Yellow House (Vikramshila)</button>
+
+      <div id="votedMsg" role="status">✅ <span id="votedText">You've already voted. Thank you!</span></div>
+
+      <div class="votes">
+        <div id="votesText">Votes: 0</div>
+        <button id="refreshBtn" style="background:#2563eb;color:#fff;border-radius:10px;padding:6px 10px;border:none;cursor:pointer">Refresh</button>
+      </div>
+
+      <div class="results" id="resultsArea" aria-live="polite">
+        <!-- result rows inserted here -->
+      </div>
+
+      <div class="footer">Made by YuvanSankarRaja S</div>
+    </div>
+  </div>
+
+<script type="module">
+/*
+  Final merged script:
+  - Uses Firebase Realtime Database (modular SDK)
+  - Anonymous auth to get stable uid
+  - Stores user's vote at: /poll/votes/{uid}  -> { option, ts }
+  - Stores counts at: /poll/counts/{OptionName}  (transactional increments)
+  - localStorage fallback and quick local guard (poll_voted + voter-id)
+*/
+
+  // ========== 1) Your Firebase config ==========
+  const firebaseConfig = {
+    apiKey: "AIzaSyBRxGX2ySr1gwNP2I728IGXwTWzBTxGGlk",
+    authDomain: "poll-ysr.firebaseapp.com",
+    databaseURL: "https://poll-ysr-default-rtdb.firebaseio.com/",
+    projectId: "poll-ysr",
+    storageBucket: "poll-ysr.firebasestorage.app",
+    messagingSenderId: "724261938489",
+    appId: "1:724261938489:web:7d8f908dc8ade2698b74e8"
+  };
+  const hasConfig = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.databaseURL;
+
+  // ========== 2) DOM refs and state ==========
+  const buttons = document.querySelectorAll('.btn');
+  const votesText = document.getElementById('votesText');
+  const resultsArea = document.getElementById('resultsArea');
+  const refreshBtn = document.getElementById('refreshBtn');
+  const votedMsg = document.getElementById('votedMsg');
+  const votedText = document.getElementById('votedText');
+
+  const OPTIONS = ['Green','Blue','Red','Yellow'];
+  let db = null;
+  let auth = null;
+  let currentUid = null;
+  let hasVotedLocal = !!localStorage.getItem('poll_voted'); // simple quick guard
+
+  // generate a persistent voter id for non-auth fallback (still stored in localStorage)
+  function getFallbackVoterId(){
+    let id = localStorage.getItem('voterId');
+    if(!id){
+      id = 'v-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+      localStorage.setItem('voterId', id);
+    }
+    return id;
+  }
+  const fallbackVoterId = getFallbackVoterId();
+
+  // ========== 3) If firebase present, load modular SDK dynamically ==========
+  if(hasConfig){
+    try {
+      // dynamical imports (choose a specific tested version)
+      const appModP = import('https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js');
+      const dbModP = import('https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js');
+      const authModP = import('https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js');
+
+      Promise.all([appModP, dbModP, authModP]).then(async ([appMod, dbMod, authMod]) => {
+        const { initializeApp } = appMod;
+        const { getDatabase, ref, onValue, runTransaction, get, child, set } = dbMod;
+        const { getAuth, signInAnonymously, onAuthStateChanged } = authMod;
+
+        // init
+        const app = initializeApp(firebaseConfig);
+        db = getDatabase(app);
+        auth = getAuth(app);
+
+        // attempt anonymous sign-in (gives stable uid across sessions for anonymous user)
+        try {
+          await signInAnonymously(auth);
+        } catch(e){
+          // it's okay if this errors — onAuthStateChanged will still fire with existing user
+          console.warn('Anonymous sign-in error:', e && e.message ? e.message : e);
+        }
+
+        // listen for auth changes
+        onAuthStateChanged(auth, async user => {
+          if(user){
+            currentUid = user.uid;
+            // console.log('auth uid', currentUid);
+            // check if this uid already voted in DB
+            try {
+              const userVoteSnap = await get(child(ref(db), `poll/votes/${currentUid}`));
+              if(userVoteSnap && userVoteSnap.exists()){
+                const recorded = userVoteSnap.val();
+                showVoted(recorded.option);
+              } else if(hasVotedLocal){
+                // localStorage says voted, but DB hasn't recorded yet - show voted to avoid duplicates
+                showVoted(null);
+              } else {
+                enableButtons(true);
+              }
+            } catch(err){
+              console.error('check user vote error', err);
+              enableButtons(true);
+            }
+          } else {
+            // no user — allow buttons (we'll fallback to local voter id)
+            enableButtons(true);
+          }
+        });
+
+        // realtime counts listener
+        const countsRef = ref(db, 'poll/counts');
+        onValue(countsRef, snap => {
+          updateLocalResults(snap.val() || {});
+        }, err => {
+          console.error('onValue counts error', err);
+        });
+
+        // expose castVote (used by click handler)
+        async function castVote(uid, option){
+          if(!db || !uid) return;
+          if(!OPTIONS.includes(option)) return;
+          const userVoteRef = ref(db, `poll/votes/${uid}`);
+          const optCountRef = ref(db, `poll/counts/${option}`);
+
+          try {
+            // ensure user doesn't have vote (re-check)
+            const existing = await get(userVoteRef);
+            if(existing && existing.exists()){
+              showVoted(existing.val().option || option);
+              return;
+            }
+            // set user record first (so other checks can see it) then increment count
+            await set(userVoteRef, { option: option, ts: Date.now() });
+            await runTransaction(optCountRef, (c) => (c || 0) + 1);
+            localStorage.setItem('poll_voted','1'); // mark local guard
+            showVoted(option);
+          } catch(err){
+            console.error('castVote error', err);
+            alert('Vote failed. Try again.');
+            enableButtons(true);
+          }
+        }
+
+        // attach to global for handler
+        window._castVote = castVote;
+
+      }).catch(err=>{
+        console.error('Firebase SDK load failed', err);
+        // SDK failed to load; enable buttons so user can demo local fallback
+        enableButtons(true);
+      });
+
+    } catch(e){
+      console.error('Firebase init error', e);
+      enableButtons(true);
+    }
+
+  } else {
+    // No config: run fallback local mode
+    console.warn('No firebase config provided; running local fallback only.');
+    enableButtons(true);
+  }
+
+  // ========== 4) Button handlers ==========
+  buttons.forEach(b=>{
+    b.addEventListener('click', async (e)=>{
+      const opt = b.getAttribute('data-option');
+      if(!opt) return;
+
+      // quick local guard (prevent double-click)
+      if(localStorage.getItem('poll_voted')){
+        showVoted(null);
+        return;
+      }
+
+      // if firebase cast available and user authenticated (currentUid), use it
+      if(window._castVote && currentUid){
+        enableButtons(false);
+        await window._castVote(currentUid, opt);
+        return;
+      }
+
+      // fallback path: use fallback voter id and store in DB voters node if db available,
+      // otherwise use purely localStorage counts (demo)
+      if(db){
+        // attempt a writable path using fallback id: /poll/voters/{fallbackVoterId}
+        try {
+          // check voters node
+          const dbMod = await import('https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js');
+          const { ref, get, child, set, runTransaction } = dbMod;
+          const voterRef = ref(db, `poll/voters/${fallbackVoterId}`);
+          const snap = await get(voterRef);
+          if(snap && snap.exists()){
+            showVoted(null);
+            localStorage.setItem('poll_voted','1');
+            return;
+          }
+          // set voter marker then increment
+          await set(voterRef, { option: opt, ts: Date.now() });
+          const optRef = ref(db, `poll/counts/${opt}`);
+          await runTransaction(optRef, (c) => (c || 0) + 1);
+          localStorage.setItem('poll_voted','1');
+          showVoted(opt);
+          return;
+        } catch(err){
+          console.warn('fallback DB vote failed, falling back to localStorage', err);
+          // continue to localStorage fallback
+        }
+      }
+
+      // final fallback: purely local (demo only)
+      incrementLocalFallback(opt);
+      localStorage.setItem('poll_voted','1');
+      showVoted(opt);
+    });
+  });
+
+  // Refresh counts button: manual refresh from DB
+  refreshBtn.addEventListener('click', async ()=>{
+    if(!db){
+      alert('Realtime DB not configured.');
+      return;
+    }
+    try {
+      const dbMod = await import('https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js');
+      const { get, child, ref } = dbMod;
+      const snap = await get(child(ref(db), 'poll/counts'));
+      updateLocalResults(snap.val() || {});
+    } catch(e){
+      console.error('manual refresh error', e);
+    }
+  });
+
+  // ========== UI helpers ==========
+  function showVoted(option){
+    votedMsg.style.display = 'flex';
+    if(option) votedText.textContent = `You've already voted (${option}). Thank you!`;
+    else votedText.textContent = `You've already voted. Thank you!`;
+    enableButtons(false);
+  }
+
+  function enableButtons(enable){
+    buttons.forEach(b=>{
+      if(enable){
+        b.disabled = false;
+        b.classList.remove('disabled');
+        b.style.opacity = '1';
+      } else {
+        b.disabled = true;
+        b.classList.add('disabled');
+        b.style.opacity = '0.6';
+      }
+    });
+  }
+
+  // update UI with counts data (object keys = OPTION names)
+  function updateLocalResults(data){
+    let total = 0;
+    OPTIONS.forEach(k => total += (data && data[k]) ? Number(data[k]) : 0);
+    votesText.textContent = 'Votes: ' + total;
+    resultsArea.innerHTML = '';
+    OPTIONS.forEach(k=>{
+      const count = (data && data[k]) ? Number(data[k]) : 0;
+      const percent = total ? Math.round((count / total) * 100) : 0;
+      const row = document.createElement('div');
+      row.className = 'result-row';
+      row.innerHTML = `
+        <div style="min-width:120px">${k}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex:1">
+          <div class="bar" aria-hidden><i style="width:${percent}%"></i></div>
+          <div style="min-width:48px;text-align:right">${count} (${percent}%)</div>
+        </div>`;
+      resultsArea.appendChild(row);
+    });
+    resultsArea.style.display = 'block';
+  }
+
+  // very small local fallback counts storage (for demo when DB is missing)
+  function incrementLocalFallback(opt){
+    const key = 'local_counts';
+    const raw = localStorage.getItem(key);
+    const obj = raw ? JSON.parse(raw) : {};
+    obj[opt] = (obj[opt] || 0) + 1;
+    localStorage.setItem(key, JSON.stringify(obj));
+    updateLocalResults(obj);
+  }
+
+  // initial state on load:
+  if(hasVotedLocal){
+    showVoted(null);
+  } else {
+    // keep buttons disabled if we are waiting for auth/check
+    if(hasConfig) enableButtons(false);
+    else enableButtons(true);
+  }
+  updateLocalResults({}); // empty until DB listener populates
+
+</script>
+
+</body>
+</html>
