@@ -392,6 +392,145 @@
   updateLocalResults({}); // empty until DB listener populates
 
 </script>
+<!-- Firebase (compat) SDKs - add before </body> -->
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+<script>
+  // ====== 1) PUT your firebase config here (replace the values) ======
+  // You can copy this from Firebase Console -> Project settings -> Add app -> SDK config
+  const firebaseConfig = {
+    apiKey: "AIza...YOUR_API_KEY...",
+    authDomain: "your-project-id.firebaseapp.com",
+    databaseURL: "https://your-project-id-default-rtdb.firebaseio.com", // <- IMPORTANT: put your Realtime DB URL
+    projectId: "your-project-id",
+    storageBucket: "your-project-id.appspot.com",
+    messagingSenderId: "xxxxxxx",
+    appId: "1:xxxx:web:xxxx",
+  };
+  // ==================================================================
+
+  // init
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  // Helper: get or create a voter id stored in localStorage
+  function getVoterId() {
+    let id = localStorage.getItem('voterId');
+    if (!id) {
+      // use crypto.randomUUID if available or fallback
+      id = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
+           : 'v_' + Date.now() + '_' + Math.random().toString(36).slice(2,9);
+      localStorage.setItem('voterId', id);
+    }
+    return id;
+  }
+
+  // UI helpers (adapt these selectors to match your HTML)
+  function showAlreadyVotedMessage() {
+    // Create or display a simple message — change to match your page markup
+    let el = document.getElementById('already-voted-msg');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'already-voted-msg';
+      el.style = 'margin-top:20px; color:#2f7a2f; font-weight:600;';
+      el.innerHTML = '✅ You\'ve already voted. Thank you!';
+      const container = document.querySelector('body'); // adjust if you have a container
+      container.insertBefore(el, container.firstChild);
+    } else {
+      el.style.display = 'block';
+    }
+  }
+
+  function showVoteFailed(err) {
+    console.error('Vote failed:', err);
+    alert('Vote failed. Try again.');
+  }
+
+  // Check whether this voter already exists in DB
+  async function hasVoted(voterId) {
+    const snap = await db.ref('votesByUser/' + voterId).get();
+    return snap.exists();
+  }
+
+  // Atomic vote using transaction (ensures correct increments under load)
+  function castVote(optionKey) {
+    const voterId = getVoterId();
+
+    // first check local + DB
+    hasVoted(voterId).then(already => {
+      if (already) {
+        showAlreadyVotedMessage();
+        return;
+      }
+
+      // run transaction on selected option count
+      const countRef = db.ref('options/' + optionKey + '/count');
+      countRef.transaction(current => (current || 0) + 1, (error, committed, snapshot) => {
+        if (error) {
+          showVoteFailed(error);
+          return;
+        }
+        if (!committed) {
+          showVoteFailed('Transaction not committed.');
+          return;
+        }
+        // mark user as voted
+        db.ref('votesByUser/' + voterId).set({
+          option: optionKey,
+          time: Date.now()
+        }).then(() => {
+          // success UI update
+          showAlreadyVotedMessage();
+          refreshResults(); // update counts on page
+        }).catch(err => {
+          showVoteFailed(err);
+        });
+      });
+    }).catch(err => showVoteFailed(err));
+  }
+
+  // Refresh counts on page (reads options/*/count and displays)
+  async function refreshResults() {
+    const snap = await db.ref('options').get();
+    if (!snap.exists()) return;
+    const data = snap.val(); // e.g. { Green: {count: 3}, Blue: {count:1}, ... }
+
+    // Example: update HTML elements with IDs like "count-Green" and "bar-Green"
+    Object.keys(data).forEach(key => {
+      const cnt = data[key].count || 0;
+      const counterEl = document.getElementById('count-' + key);
+      if (counterEl) counterEl.textContent = cnt;
+      // optionally update progress bars, percentages etc.
+    });
+
+    // update total votes display (if you have an element #total-votes)
+    const total = Object.values(data).reduce((s,v) => s + (v.count||0), 0);
+    const totalEl = document.getElementById('total-votes');
+    if (totalEl) totalEl.textContent = total;
+  }
+
+  // Hook your buttons — example:
+  function attachVoteButtons() {
+    // Change selectors to match your button structure and option keys
+    document.querySelectorAll('[data-vote-option]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.getAttribute('data-vote-option'); // e.g. "Green"
+        castVote(key);
+      });
+    });
+  }
+
+  // On load: attach buttons & refresh UI, and show already-voted state if needed.
+  window.addEventListener('load', async () => {
+    attachVoteButtons();
+    await refreshResults();
+    const voterId = getVoterId();
+    if (await hasVoted(voterId)) showAlreadyVotedMessage();
+  });
+
+</script>
 
 </body>
 </html>
+
